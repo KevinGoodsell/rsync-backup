@@ -1,0 +1,98 @@
+#!/usr/bin/env python
+
+import sys
+import subprocess
+
+class RsyncCommand(object);
+    commandName = 'rsync'
+    baseArgs = []
+
+    def __init__(self, src, dest, args=None):
+        if args is None:
+            args = []
+        self._src = src
+        self._dest = dest
+        self._args = args
+
+        if not self._src.endswith('/'):
+            self._src += '/'
+
+        self._handlers = []
+
+    def addOutputHandler(self, handler):
+        self._handlers.append(handler)
+
+    def addArgs(self, args):
+        if isinstance(args, basestring):
+            args = [args]
+        self._args.extend(args)
+
+    def run(self):
+        args = [self.commandName] + self.baseArgs + self._args
+        args.extend(self._extraArgs())
+        args.extend([self._src, self._dest])
+
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE)
+        for line in proc.stdout:
+            for handler in self._handlers:
+                handler.output(line)
+
+        return proc.returncode
+
+    # Overridable
+    def _extraArgs(self):
+        return []
+
+class RsyncBackup(RsyncCommand):
+    pass
+
+class RsyncVerify(RsyncCommand):
+    pass
+
+class OutputHandler(object):
+    def output(self, line):
+        raise NotImplementedError()
+
+class StreamOutputHandler(OutputHandler):
+    def __init__(self, stream=sys.stdout):
+        self._stream = stream
+
+    def output(self, line):
+        self._stream.write(line)
+
+class FileOutputHandler(StreamOutputHandler):
+    def __init__(self, filename, mode='w'):
+        StreamOutputHandler.__init__(self, open(filename, mode))
+        self._filename = filename
+        self._mode = mode
+
+class Configuratian(object):
+    defaultConfig = {
+    }
+
+    requiredFields = []
+
+    def __init__(self):
+        self._conf = dict(self.defaultConfig)
+
+    def update(self, filename):
+        userConf = {}
+        execfile(filename, userConf)
+        self._conf.update(userConf)
+
+    def check(self):
+        'Make sure required fields are present'
+        missing = []
+        for field in self.requiredFields:
+            if field not in self._conf:
+                missing.append(field)
+
+        if missing:
+            raise ValueError('Missing required configuration items: %r' %
+                             missing)
+
+def main(args=None):
+    pass
+
+if __name__ == '__main__':
+    sys.exit(main())
