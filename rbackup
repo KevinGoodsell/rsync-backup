@@ -133,14 +133,15 @@ def main(args=None):
         args = sys.argv[1:]
 
     try:
-        (opts, arguments) = getopt.getopt(args, '', ['config=', 'rsync_opts=',
-                                          'verify'])
+        (opts, arguments) = getopt.getopt(args, 'n', ['config=', 'rsync_opts=',
+                                          'verify', 'dry-run'])
     except getopt.GetoptError, e:
         raise # XXX Do something smarter later
 
     config_dir = os.path.expanduser('~/.rbackup')
     rsync_opts = []
     verify = False
+    dry_run = False
 
     for (opt, val) in opts:
         if opt == '--config':
@@ -149,19 +150,27 @@ def main(args=None):
             rsync_opts.extend(val.split())
         elif opt == '--verify':
             verify = True
+        elif opt in ('-n', '--dry-run'):
+            dry_run = True
 
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
 
     if verify:
         cmd_class = RsyncVerify
+        if record.last_backup:
+            target = os.path.join(config.BACKUP_POOL, record.last_backup)
+        else:
+            print >> sys.stderr, 'No last backup to verify!'
+            return 1
     else:
         cmd_class = RsyncBackup
+        new_name = backup_name()
+        target = os.path.join(config.BACKUP_POOL, new_name)
 
-    # XXX This is all wrong for verify
-    new_name = backup_name()
-    target = os.path.join(config.BACKUP_POOL, new_name)
     command = cmd_class(config.SOURCE, target, record.last_backup, rsync_opts)
+    if dry_run:
+        command.addArgs('--dry-run')
 
     command.addOutputHandler(StreamOutputHandler())
     if config.LOG_NAME:
@@ -177,8 +186,9 @@ def main(args=None):
         print >> sys.stderr, 'rsync exited with signal %d' % -result
         result = 1
 
-    record.last_backup = new_name
-    record.write()
+    if not verify and not dry_run:
+        record.last_backup = new_name
+        record.write()
 
     return result
 
