@@ -5,9 +5,9 @@ import os
 import subprocess
 import getopt
 
-class RsyncCommand(object);
+class RsyncCommand(object):
     commandName = 'rsync'
-    baseArgs = ['--archive', '--itemize-changes']
+    baseArgs = ['--archive', '--itemize-changes', '-vv']
 
     def __init__(self, src, dest, link=None, args=None):
         if args is None:
@@ -35,15 +35,17 @@ class RsyncCommand(object);
         args.extend(self._extraArgs())
 
         if self._link is not None:
-            args.append('--link-dest=%s' % self._link)
+            args.append('--link-dest=../%s' % self._link)
 
         args.extend([self._src, self._dest])
 
+        print >> sys.stderr, 'rsync command: %s' % args
         proc = subprocess.Popen(args, stdout=subprocess.PIPE)
         for line in proc.stdout:
             for handler in self._handlers:
                 handler.output(line)
 
+        proc.wait()
         return proc.returncode
 
     # Overridable
@@ -131,7 +133,7 @@ def main(args=None):
         args = sys.argv[1:]
 
     try:
-        (opts, arguments) = getopt.getopt(args, '', ['config=', 'rsync_opts',
+        (opts, arguments) = getopt.getopt(args, '', ['config=', 'rsync_opts=',
                                           'verify'])
     except getopt.GetoptError, e:
         raise # XXX Do something smarter later
@@ -144,7 +146,7 @@ def main(args=None):
         if opt == '--config':
             config_dir = val
         elif opt == '--rsync_opts':
-            rsync_opts.expand(val.split())
+            rsync_opts.extend(val.split())
         elif opt == '--verify':
             verify = True
 
@@ -156,6 +158,7 @@ def main(args=None):
     else:
         cmd_class = RsyncBackup
 
+    # XXX This is all wrong for verify
     new_name = backup_name()
     target = os.path.join(config.BACKUP_POOL, new_name)
     command = cmd_class(config.SOURCE, target, record.last_backup, rsync_opts)
