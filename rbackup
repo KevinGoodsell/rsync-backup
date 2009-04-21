@@ -79,6 +79,8 @@ class FileOutputHandler(StreamOutputHandler):
 class Configuration(object):
     defaultConfig = {
         'LOG_NAME' : None,
+        'LOG_DIR'  : None,
+        'EXCLUDES' : [],
     }
 
     requiredFields = ['SOURCE', 'BACKUP_POOL']
@@ -155,6 +157,7 @@ def main(args=None):
 
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
+    new_name = backup_name()
 
     if verify:
         cmd_class = RsyncVerify
@@ -165,15 +168,19 @@ def main(args=None):
             return 1
     else:
         cmd_class = RsyncBackup
-        new_name = backup_name()
         target = os.path.join(config.BACKUP_POOL, new_name)
 
     command = cmd_class(config.SOURCE, target, record.last_backup, rsync_opts)
     if dry_run:
         command.addArgs('--dry-run')
+    if config.EXCLUDES:
+        command.addArgs(['--exclude=%s' % exc for exc in config.EXCLUDES])
 
     command.addOutputHandler(StreamOutputHandler())
-    if config.LOG_NAME:
+    if config.LOG_DIR:
+        name = os.path.join(config.LOG_DIR, '%s.log' % new_name)
+        command.addOutputHandler(FileOutputHandler(name))
+    elif config.LOG_NAME:
         command.addOutputHandler(FileOutputHandler(config.LOG_NAME))
 
     result = command.run()
