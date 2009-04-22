@@ -9,12 +9,11 @@ class RsyncCommand(object):
     commandName = 'rsync'
     baseArgs = ['--archive', '--itemize-changes', '-vv']
 
-    def __init__(self, src, dest, link=None, args=None):
+    def __init__(self, src, dest, args=None):
         if args is None:
             args = []
         self._src = src
         self._dest = dest
-        self._link = link
         self._args = args
 
         if not self._src.endswith('/'):
@@ -33,10 +32,6 @@ class RsyncCommand(object):
     def run(self):
         args = [self.commandName] + self.baseArgs + self._args
         args.extend(self._extraArgs())
-
-        if self._link is not None:
-            args.append('--link-dest=../%s' % self._link)
-
         args.extend([self._src, self._dest])
 
         print >> sys.stderr, 'rsync command: %s' % args
@@ -53,7 +48,15 @@ class RsyncCommand(object):
         return []
 
 class RsyncBackup(RsyncCommand):
-    pass
+    def __init__(self, src, dest, link=None, args=None):
+        RsyncCommand.__init__(self, src, dest, args)
+        self._link = link
+
+    def _extraArgs(self):
+        if self._link is None:
+            return []
+        else:
+            return ['--link-dest=%s' % self._link]
 
 class RsyncVerify(RsyncCommand):
     def _extraArgs(self):
@@ -136,7 +139,7 @@ def main(args=None):
 
     try:
         (opts, arguments) = getopt.getopt(args, 'n', ['config=', 'rsync_opts=',
-                                          'verify', 'dry-run'])
+                                          'verify', 'dry-run', 'previous='])
     except getopt.GetoptError, e:
         raise # XXX Do something smarter later
 
@@ -144,6 +147,7 @@ def main(args=None):
     rsync_opts = []
     verify = False
     dry_run = False
+    previous = None
 
     for (opt, val) in opts:
         if opt == '--config':
@@ -154,23 +158,31 @@ def main(args=None):
             verify = True
         elif opt in ('-n', '--dry-run'):
             dry_run = True
+        elif opt == '--previous':
+            previous = val
 
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
     new_name = backup_name()
 
     if verify:
-        cmd_class = RsyncVerify
-        if record.last_backup:
+        if previous is not None:
+            target = previous
+        elif record.last_backup is not None:
             target = os.path.join(config.BACKUP_POOL, record.last_backup)
         else:
             print >> sys.stderr, 'No last backup to verify!'
             return 1
+        command = RsyncVerify(config.SOURCE, target, rsync_opts)
     else:
-        cmd_class = RsyncBackup
+        # XXX This works, but --previous is confusing. In combination with
+        # --verify, or as an absolute path, it is straight-forward, but
+        # otherwise it is relative to the target dir, which is weird.
+        if previous is None and record.last_backup is not None:
+            previous = os.path.join('..', record.last_backup)
         target = os.path.join(config.BACKUP_POOL, new_name)
+        command = RsyncBackup(config.SOURCE, target, previous, rsync_opts)
 
-    command = cmd_class(config.SOURCE, target, record.last_backup, rsync_opts)
     if dry_run:
         command.addArgs('--dry-run')
     if config.EXCLUDES:
