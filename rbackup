@@ -30,8 +30,8 @@ class RsyncCommand(object):
         self._args.extend(args)
 
     def run(self):
-        args = [self.commandName] + self.baseArgs + self._args
-        args.extend(self._extraArgs())
+        args = [self.commandName] + self.baseArgs + self._extraArgs()
+        args.extend(self._args)
         args.extend([self._src, self._dest])
 
         print >> sys.stderr, 'rsync command: %s' % args
@@ -173,7 +173,7 @@ def main(args=None):
         else:
             print >> sys.stderr, 'No last backup to verify!'
             return 1
-        command = RsyncVerify(config.SOURCE, target, rsync_opts)
+        command = RsyncVerify(config.SOURCE, target)
     else:
         # XXX This works, but --previous is confusing. In combination with
         # --verify, or as an absolute path, it is straight-forward, but
@@ -181,12 +181,13 @@ def main(args=None):
         if previous is None and record.last_backup is not None:
             previous = os.path.join('..', record.last_backup)
         target = os.path.join(config.BACKUP_POOL, new_name)
-        command = RsyncBackup(config.SOURCE, target, previous, rsync_opts)
+        command = RsyncBackup(config.SOURCE, target, previous)
 
     if dry_run:
         command.addArgs('--dry-run')
     if config.EXCLUDES:
         command.addArgs(['--exclude=%s' % exc for exc in config.EXCLUDES])
+    command.addArgs(rsync_opts)
 
     command.addOutputHandler(StreamOutputHandler())
     if config.LOG_DIR:
