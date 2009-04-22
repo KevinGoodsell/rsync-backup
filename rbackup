@@ -81,9 +81,12 @@ class FileOutputHandler(StreamOutputHandler):
 
 class Configuration(object):
     defaultConfig = {
-        'LOG_NAME' : None,
-        'LOG_DIR'  : None,
-        'EXCLUDES' : [],
+        'LOG_NAME'    : None,
+        'LOG_DIR'     : None,
+        'EXCLUDES'    : [],
+        'RSYNC_OPTS'  : [],
+        'BACKUP_OPTS' : [],
+        'VERIFY_OPTS' : [],
     }
 
     requiredFields = ['SOURCE', 'BACKUP_POOL']
@@ -187,6 +190,12 @@ def main(args=None):
         command.addArgs('--dry-run')
     if config.EXCLUDES:
         command.addArgs(['--exclude=%s' % exc for exc in config.EXCLUDES])
+    # Add options from config file and command line, in that order.
+    command.addArgs(config.RSYNC_OPTS)
+    if verify:
+        command.addArgs(config.VERIFY_OPTS)
+    else:
+        command.addArgs(config.BACKUP_OPTS)
     command.addArgs(rsync_opts)
 
     command.addOutputHandler(StreamOutputHandler())
