@@ -138,7 +138,7 @@ def main(args=None):
         args = sys.argv[1:]
 
     try:
-        (opts, arguments) = getopt.getopt(args, 'n', ['config=', 'rsync_opts=',
+        (opts, arguments) = getopt.getopt(args, 'n', ['config=', 'rsync-opts=',
                                           'verify', 'dry-run', 'previous='])
     except getopt.GetoptError, e:
         raise # XXX Do something smarter later
@@ -152,7 +152,7 @@ def main(args=None):
     for (opt, val) in opts:
         if opt == '--config':
             config_dir = val
-        elif opt == '--rsync_opts':
+        elif opt == '--rsync-opts':
             rsync_opts.extend(val.split())
         elif opt == '--verify':
             verify = True
