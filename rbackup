@@ -39,7 +39,8 @@ class RsyncCommand(object):
         args.extend([self._src, self._dest])
 
         self._handler.log('rsync command: %s' % args)
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+        # line-buffered, capture stdout, tie stderr to stdout.
+        proc = subprocess.Popen(args, bufsize=1, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT)
         for line in proc.stdout:
             self._handler.rsyncLine(line)
