@@ -5,6 +5,10 @@ import os
 import subprocess
 import getopt
 
+#######################
+# rsync command classes
+#######################
+
 class RsyncCommand(object):
     commandName = 'rsync'
     baseArgs = ['--archive', '--itemize-changes', '-vv']
@@ -19,10 +23,10 @@ class RsyncCommand(object):
         if not self._src.endswith('/'):
             self._src += '/'
 
-        self._handlers = []
+        self._handler = NullOutputHandler()
 
-    def addOutputHandler(self, handler):
-        self._handlers.append(handler)
+    def setOutputHandler(self, handler):
+        self._handler = handler
 
     def addArgs(self, args):
         if isinstance(args, basestring):
@@ -34,11 +38,10 @@ class RsyncCommand(object):
         args.extend(self._args)
         args.extend([self._src, self._dest])
 
-        print >> sys.stderr, 'rsync command: %s' % args
+        self._handler.log('rsync command: %s' % args)
         proc = subprocess.Popen(args, stdout=subprocess.PIPE)
         for line in proc.stdout:
-            for handler in self._handlers:
-                handler.output(line)
+            self._handler.rsyncLine(line)
 
         proc.wait()
         return proc.returncode
@@ -62,26 +65,71 @@ class RsyncVerify(RsyncCommand):
     def _extraArgs(self):
         return ['--dry-run', '--checksum']
 
+#################
+# Output handlers
+#################
+
 class OutputHandler(object):
-    def output(self, line):
+    def rsyncLine(self, line):
         raise NotImplementedError()
 
-class StreamOutputHandler(OutputHandler):
-    def __init__(self, stream=sys.stdout):
-        self._stream = stream
+    def log(self, mesg):
+        raise NotImplementedError()
 
-    def output(self, line):
+    def close(self):
+        pass
+
+class NullOutputHandler(OutputHandler):
+    def rsyncLine(self, line):
+        pass
+
+    def log(self, mesg):
+        pass
+
+class SequenceOutputHandler(OutputHandler):
+    def __init__(self, handlers=None):
+        if handlers is None:
+            handlers = []
+        self._handlers = handlers
+
+    def addHandler(self, handler):
+        self._handlers.append(handler)
+
+    def rsyncLine(self, line):
+        for handler in self._handlers:
+            handler.rsyncLine(line)
+
+    def log(self, mesg):
+        for handler in self._handlers:
+            handler.log(mesg)
+
+    def close(self):
+        for handler in self._handlers:
+            handler.close()
+
+class StreamOutputHandler(OutputHandler):
+    def __init__(self, stream=sys.stdout, close=False):
+        self._stream = stream
+        self._close = close
+
+    def rsyncLine(self, line):
         self._stream.write(line)
+
+    def log(self, mesg):
+        self._stream.write(mesg + '\n')
+
+    def close(self):
+        if self._close:
+            self._stream.close()
 
 class FileOutputHandler(StreamOutputHandler):
     def __init__(self, filename, mode='w'):
-        StreamOutputHandler.__init__(self, open(filename, mode))
+        StreamOutputHandler.__init__(self, open(filename, mode), close=True)
         self._filename = filename
         self._mode = mode
 
 class Configuration(object):
     defaultConfig = {
-        'LOG_NAME'    : None,
         'LOG_DIR'     : None,
         'EXCLUDES'    : [],
         'RSYNC_OPTS'  : [],
@@ -146,6 +194,10 @@ def main(args=None):
     except getopt.GetoptError, e:
         raise # XXX Do something smarter later
 
+    if arguments:
+        print >> sys.stderr, 'Unexpected arguments: %r' % arguments
+        return 2
+
     config_dir = os.path.expanduser('~/.rbackup')
     rsync_opts = []
     verify = False
@@ -198,22 +250,24 @@ def main(args=None):
         command.addArgs(config.BACKUP_OPTS)
     command.addArgs(rsync_opts)
 
-    command.addOutputHandler(StreamOutputHandler())
+    handler = SequenceOutputHandler()
+    handler.addHandler(StreamOutputHandler())
     if config.LOG_DIR:
         name = os.path.join(config.LOG_DIR, '%s.log' % new_name)
-        command.addOutputHandler(FileOutputHandler(name))
-    elif config.LOG_NAME:
-        command.addOutputHandler(FileOutputHandler(config.LOG_NAME))
+        handler.addHandler(FileOutputHandler(name))
+    command.setOutputHandler(handler)
 
     result = command.run()
     if result is None:
-        print >> sys.stderr, "rsync didn't exit??"
+        handler.log("rsync didn't exit??")
         result = 1
     elif result > 0:
-        print >> sys.stderr, 'rsync error: %d' % result
+        handler.log('rsync error: %d' % result)
     elif result < 0:
-        print >> sys.stderr, 'rsync exited with signal %d' % -result
+        handler.log('rsync exited with signal %d' % -result)
         result = 1
+
+    handler.close()
 
     if not verify and not dry_run:
         record.last_backup = new_name
