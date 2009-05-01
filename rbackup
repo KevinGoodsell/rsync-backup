@@ -221,24 +221,22 @@ def main(args=None):
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
     new_name = backup_name()
+    prev_name = previous or record.last_backup
 
     if verify:
-        if previous is not None:
-            target = previous
-        elif record.last_backup is not None:
-            target = os.path.join(config.BACKUP_POOL, record.last_backup)
+        if prev_name is not None:
+            target = os.path.join(config.BACKUP_POOL, prev_name)
         else:
             print >> sys.stderr, 'No last backup to verify!'
             return 1
         command = RsyncVerify(config.SOURCE, target)
     else:
-        # XXX This works, but --previous is confusing. In combination with
-        # --verify, or as an absolute path, it is straight-forward, but
-        # otherwise it is relative to the target dir, which is weird.
-        if previous is None and record.last_backup is not None:
-            previous = os.path.join('..', record.last_backup)
+        if prev_name is not None:
+            link = os.path.join('..', prev_name)
+        else:
+            link = None
         target = os.path.join(config.BACKUP_POOL, new_name)
-        command = RsyncBackup(config.SOURCE, target, previous)
+        command = RsyncBackup(config.SOURCE, target, link)
 
     if dry_run:
         command.addArgs('--dry-run')
