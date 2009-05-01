@@ -3,7 +3,7 @@
 import sys
 import os
 import subprocess
-import getopt
+from optparse import OptionParser
 
 #######################
 # rsync command classes
@@ -186,44 +186,57 @@ def backup_name():
     import time
     return time.strftime('%Y-%m-%d_%H:%M:%S')
 
+##################################
+# Option parsing and main function
+##################################
+
+opt_parser = OptionParser(description='''Make backups using rsync, hardlinking
+unchanged files to save space.''')
+
+def options(args):
+    opt_parser.add_option('-n', '--dry-run', action='store_true', help=
+'''Don't make a backup, but write logs and output as if a backup were being
+made.''')
+
+    opt_parser.add_option('--config', metavar='CONFIG_DIR', help='''Use
+CONFIG_DIR as the config directory instead of the default ~/.rbackup.''')
+
+    opt_parser.add_option('--verify', action='store_true', help='''Verify the
+most recent backup instead of creating a new backup.''')
+
+    opt_parser.add_option('--previous', metavar='BACKUP_NAME', help='''Use
+BACKUP_NAME as the previous backup. This is used as the backup to link to when
+creating a new backup, or the backup to verify against when --verify is given.
+By default the last backup name is automatically tracked, so this is usually
+unnecessary.''')
+
+    opt_parser.add_option('--rsync-opts', metavar='OPTION_STRING', help=
+'''Extra options to pass to rsync. OPTION_STRING is split on whitespace and the
+resulting items are passed as separate arguments to rsync. (This means that
+you can't currently pass an argument that contains whitespace.)''')
+
+    opt_parser.set_defaults(dry_run=False, config=None, verify=False,
+                            previous=None, rsync_opts='')
+
+    return opt_parser.parse_args(args)
+
 def main(args=None):
     if args is None:
         args = sys.argv[1:]
 
-    try:
-        (opts, arguments) = getopt.getopt(args, 'n', ['config=', 'rsync-opts=',
-                                          'verify', 'dry-run', 'previous='])
-    except getopt.GetoptError, e:
-        raise # XXX Do something smarter later
+    (opts, arguments) = options(args)
 
     if arguments:
-        print >> sys.stderr, 'Unexpected arguments: %r' % arguments
-        return 2
+        opt_parser.error('Unexpected arguments: %r' % arguments)
 
-    config_dir = os.path.expanduser('~/.rbackup')
-    rsync_opts = []
-    verify = False
-    dry_run = False
-    previous = None
-
-    for (opt, val) in opts:
-        if opt == '--config':
-            config_dir = val
-        elif opt == '--rsync-opts':
-            rsync_opts.extend(val.split())
-        elif opt == '--verify':
-            verify = True
-        elif opt in ('-n', '--dry-run'):
-            dry_run = True
-        elif opt == '--previous':
-            previous = val
-
+    config_dir = opts.config or os.path.expanduser('~/.rbackup')
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
-    new_name = backup_name()
-    prev_name = previous or record.last_backup
 
-    if verify:
+    prev_name = opts.previous or record.last_backup
+    new_name = backup_name()
+
+    if opts.verify:
         if prev_name is not None:
             target = os.path.join(config.BACKUP_POOL, prev_name)
         else:
@@ -238,17 +251,17 @@ def main(args=None):
         target = os.path.join(config.BACKUP_POOL, new_name)
         command = RsyncBackup(config.SOURCE, target, link)
 
-    if dry_run:
+    if opts.dry_run:
         command.addArgs('--dry-run')
     if config.EXCLUDES:
         command.addArgs(['--exclude=%s' % exc for exc in config.EXCLUDES])
     # Add options from config file and command line, in that order.
     command.addArgs(config.RSYNC_OPTS)
-    if verify:
+    if opts.verify:
         command.addArgs(config.VERIFY_OPTS)
     else:
         command.addArgs(config.BACKUP_OPTS)
-    command.addArgs(rsync_opts)
+    command.addArgs(opts.rsync_opts.split())
 
     handler = SequenceOutputHandler()
     handler.addHandler(StreamOutputHandler())
@@ -269,7 +282,7 @@ def main(args=None):
 
     handler.close()
 
-    if not verify and not dry_run:
+    if not opts.verify and not opts.dry_run:
         record.last_backup = new_name
         record.write()
 
