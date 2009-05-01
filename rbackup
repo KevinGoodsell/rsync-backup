@@ -229,18 +229,25 @@ def main(args=None):
     if arguments:
         opt_parser.error('Unexpected arguments: %r' % arguments)
 
+    # Set up some vars
     config_dir = opts.config or os.path.expanduser('~/.rbackup')
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
-
     prev_name = opts.previous or record.last_backup
     new_name = backup_name()
+
+    # Set up output/logging
+    output = SequenceOutputHandler()
+    output.addHandler(StreamOutputHandler())
+    if config.LOG_DIR:
+        name = os.path.join(config.LOG_DIR, '%s.log' % new_name)
+        output.addHandler(FileOutputHandler(name))
 
     if opts.verify:
         if prev_name is not None:
             target = os.path.join(config.BACKUP_POOL, prev_name)
         else:
-            print >> sys.stderr, 'No last backup to verify!'
+            output.log('No last backup to verify!')
             return 1
         command = RsyncVerify(config.SOURCE, target)
     else:
@@ -250,6 +257,8 @@ def main(args=None):
             link = None
         target = os.path.join(config.BACKUP_POOL, new_name)
         command = RsyncBackup(config.SOURCE, target, link)
+
+    command.setOutputHandler(output)
 
     if opts.dry_run:
         command.addArgs('--dry-run')
@@ -263,24 +272,17 @@ def main(args=None):
         command.addArgs(config.BACKUP_OPTS)
     command.addArgs(opts.rsync_opts.split())
 
-    handler = SequenceOutputHandler()
-    handler.addHandler(StreamOutputHandler())
-    if config.LOG_DIR:
-        name = os.path.join(config.LOG_DIR, '%s.log' % new_name)
-        handler.addHandler(FileOutputHandler(name))
-    command.setOutputHandler(handler)
-
     result = command.run()
     if result is None:
-        handler.log("rsync didn't exit??")
+        output.log("rsync didn't exit??")
         result = 1
     elif result > 0:
-        handler.log('rsync error: %d' % result)
+        output.log('rsync error: %d' % result)
     elif result < 0:
-        handler.log('rsync exited with signal %d' % -result)
+        output.log('rsync exited with signal %d' % -result)
         result = 1
 
-    handler.close()
+    output.close()
 
     if not opts.verify and not opts.dry_run:
         record.last_backup = new_name
