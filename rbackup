@@ -137,7 +137,9 @@ class FileOutputHandler(StreamOutputHandler):
 class AnnotationMixin(object):
     unchanged = re.compile(r'([h.].|cd) {9} ')
     new = re.compile(r'..\+{9} ')
-    checksum_failed = re.compile(r'..c[s.][Tt.][p.][o.][g.][u.][a.][x.] ')
+    checksum_failed = re.compile(r'.fc[s.][Tt.][p.][o.][g.][u.][a.][x.] ')
+    # This might be overly specific.
+    updated = re.compile(r'(cd\.\.t|<f\.s[t.]|<f\.\.t)\.{6} ')
     itemized_line = re.compile(r'..[c.][s.][Tt.][p.][o.][g.][u.][a.][x.] ')
 
     def _formatLine(self, line):
@@ -147,10 +149,12 @@ class AnnotationMixin(object):
             return '+ ' + line
         elif self.checksum_failed.match(line):
             return '! ' + line
+        elif self.updated.match(line):
+            return 'M ' + line
         elif self.itemized_line.match(line):
             return '? ' + line
         else:
-            return '  ' + line
+            return '* ' + line
 
 class AnnotatedFileOutputHandler(AnnotationMixin, FileOutputHandler):
     pass
@@ -313,6 +317,15 @@ def main(args=None):
     elif result < 0:
         output.log('rsync exited with signal %d' % -result)
         result = 1
+
+    output.log('')
+    output.log('LEGEND:')
+    output.log(' + New item')
+    output.log(' M Modified item')
+    output.log(' <space> Unchanged item')
+    output.log(' ! Checksum failed')
+    output.log(' ? Itemized output that is not specifically recognized')
+    output.log(' * rsync message')
 
     output.close()
 
