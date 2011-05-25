@@ -1,0 +1,202 @@
+#!/usr/bin/env python
+
+from __future__ import division
+
+import filecmp
+import optparse
+import sys
+import os
+from stat import S_ISREG
+from warnings import warn
+
+class Inode(object):
+    __slots__ = ['stat', 'paths', 'key']
+
+    def __init__(self, stat, paths=None):
+        if paths is None:
+            paths = []
+
+        self.stat = stat
+        self.paths = set(paths)
+        self.key = (stat.st_size,
+                    stat.st_dev,
+                    stat.st_mtime if opts.time else None,
+                    stat.st_mode if opts.mode else None,
+                    stat.st_uid if opts.owner else None,
+                    stat.st_gid if opts.owner else None,
+                   )
+
+    def __str__(self):
+        return '(st_dev=%s, st_ino=%s)' % (self.stat.st_dev, self.stat.st_ino)
+
+    def disk_size(self):
+        return self.stat.st_blocks * 512
+
+    def add_path(self, path):
+        self.paths.add(path)
+
+    def can_link(self, other):
+        if self.key != other.key or self.stat.st_size == 0 or \
+           self.stat.st_ino == other.stat.st_ino:
+            return False
+
+        self_path = iter(self.paths).next()
+        other_path = iter(other.paths).next()
+        if opts.verbose:
+            print 'Comparing %r and %r' % (self_path, other_path)
+        stats.comparisons += 1
+        try:
+            return filecmp.cmp(self_path, other_path, shallow=False)
+        except OSError, e:
+            warn(str(e))
+            return False
+
+    def move_paths_from(self, other):
+        link_to_path = iter(self.paths).next()
+        if opts.verbose:
+            print 'Moving paths from inode %s to %s (%s).' % (other, self,
+                                                              link_to_path)
+        for path in other.paths:
+            try:
+                if opts.verbose:
+                    print 'Unlinking %s' % path
+                if not opts.dryrun:
+                    os.unlink(path)
+            except OSError, e:
+                warn("Failed to unlink '%s'. Skipping. (%s)" % (path, e))
+                continue
+            try:
+                if opts.verbose:
+                    print 'Re-linking %s' % path
+                if not opts.dryrun:
+                    os.link(link_to_path, path)
+            except OSError:
+                warn('link(%r, %r) failed.\n'
+                     'Since %r was already unlinked, it may be lost (but its '
+                     'content is the same as %r).' % (link_to_path, path,
+                     path, link_to_path))
+                raise
+
+        stats.saved += other.disk_size()
+
+def get_paths(dirs):
+    def warn_error(e):
+        warn(str(e), stacklevel=3)
+
+    paths = set()
+
+    for d in dirs:
+        for (dirpath, dirnames, filenames) in os.walk(d, onerror=warn_error):
+            for f in filenames:
+                fullpath = os.path.join(dirpath, f)
+                paths.add(fullpath)
+
+    return paths
+
+def get_inodes(paths):
+    inodes = {} # {(st_dev, st_ino): Inode()}
+
+    for path in paths:
+        stat = os.lstat(path)
+        if not S_ISREG(stat.st_mode):
+            continue
+        key = (stat.st_dev, stat.st_ino)
+        inode = inodes.get(key)
+        if inode is None:
+            inode = Inode(stat)
+            inodes[key] = inode
+
+        inode.add_path(path)
+
+    return inodes.values()
+
+# Args and main
+
+def parse_args(args):
+    parser = optparse.OptionParser(
+        usage='%prog [options] add-links-dir unlink-dirs...')
+
+    parser.add_option('-n', '--dry-run', dest='dryrun', action='store_true',
+        help="don't take any action, just show what would be done")
+    parser.add_option('-v', '--verbose', dest='verbose', action='store_true',
+        help='verbose mode')
+    parser.add_option('-t', '--time', dest='time', action='store_false',
+        help="don't require modification times to be the same")
+    parser.add_option('-m', '--mode', dest='mode', action='store_false',
+        help="don't require modes to be the same")
+    parser.add_option('-o', '--owner', dest='owner', action='store_false',
+        help="don't require owners to be the same")
+
+    parser.set_defaults(dryrun=False, verbose=False, time=True, mode=True,
+                        owner=True)
+
+    (opts, arguments) = parser.parse_args(args)
+
+    if len(arguments) < 2:
+        parser.error('need at least two directories')
+
+    return (opts, arguments)
+
+def size_string(bytes):
+    kil = 1024
+    meg = kil*kil
+    gig = meg*kil
+
+    if bytes < kil:
+        return '%d B' % bytes
+    elif bytes < meg:
+        return '%.1f KiB' % (bytes / kil)
+    elif bytes < gig:
+        return '%.1f MiB' % (bytes / meg)
+    else:
+        return '%.1f GiB' % (bytes / gig)
+
+class Stats(object):
+    __slots__ = ['comparisons', 'saved']
+
+    def __init__(self):
+        self.comparisons = 0
+        self.saved = 0
+
+stats = Stats()
+opts = None
+
+def main(args=None):
+    if args is None:
+        args = sys.argv[1:]
+
+    global opts
+    (opts, dirs) = parse_args(args)
+
+    if opts.verbose and opts.dryrun:
+        print 'DRY RUN'
+
+    add_links_dir = dirs[0]
+    unlink_dirs = dirs[1:]
+
+    add_links_paths = get_paths([add_links_dir])
+    unlink_paths = get_paths(unlink_dirs)
+
+    add_links_inodes = get_inodes(add_links_paths)
+    unlink_inodes = get_inodes(unlink_paths)
+
+    # Format as dict instead:
+    d = {}
+    for inode in add_links_inodes:
+        d.setdefault(inode.key, []).append(inode)
+    add_links_inodes = d
+
+    for inode in unlink_inodes:
+        for add_links_inode in add_links_inodes.get(inode.key, []):
+            if add_links_inode.can_link(inode):
+                add_links_inode.move_paths_from(inode)
+                break
+
+    print 'Mode: %s' % ('Dry Run' if opts.dryrun else 'Normal')
+    print 'Files Compared: %d' % stats.comparisons
+    print 'Space Saved: %s' % size_string(stats.saved)
+
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())
