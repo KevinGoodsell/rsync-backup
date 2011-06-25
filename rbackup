@@ -139,7 +139,7 @@ class AnnotationMixin(object):
     new = re.compile(r'..\+{9} ')
     checksum_failed = re.compile(r'.fc[s.][Tt.][p.][o.][g.][u.][a.][x.] ')
     # This might be overly specific.
-    updated = re.compile(r'(cd\.\.t|<f\.s[t.]|<f\.\.t)\.{6} ')
+    updated = re.compile(r'(cd\.\.t|[<>]f\.s[t.]|[<>]f\.\.t)\.{6} ')
     itemized_line = re.compile(r'..[c.][s.][Tt.][p.][o.][g.][u.][a.][x.] ')
 
     def _formatLine(self, line):
