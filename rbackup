@@ -218,9 +218,11 @@ class Record(object):
         print >> f, self.last_backup
         f.close()
 
-def backup_name():
+def format_time():
+    '''Returns time and date formatted in a way appropriate for sortable file
+    names'''
     import time
-    return time.strftime('%Y-%m-%d_%H:%M:%S')
+    return time.strftime('%Y-%m-%d_%H.%M.%S')
 
 ##################################
 # Option parsing and main function
@@ -240,6 +242,10 @@ CONFIG_DIR as the config directory instead of the default ~/.rbackup.''')
     opt_parser.add_option('--verify', action='store_true', help='''Verify the
 most recent backup instead of creating a new backup.''')
 
+    opt_parser.add_option('--target', help='''Specify the name of the new backup
+directory. This can be used to update a previous (possibly incomplete) backp.
+The default is based on the current date and time.''')
+
     opt_parser.add_option('--previous', metavar='BACKUP_NAME', help='''Use
 BACKUP_NAME as the previous backup. This is used as the backup to link to when
 creating a new backup, or the backup to verify against when --verify is given.
@@ -252,7 +258,7 @@ resulting items are passed as separate arguments to rsync. (This means that
 you can't currently pass an argument that contains whitespace.)''')
 
     opt_parser.set_defaults(dry_run=False, config=None, verify=False,
-                            previous=None, rsync_opts='')
+                            target=None, previous=None, rsync_opts='')
 
     return opt_parser.parse_args(args)
 
@@ -270,13 +276,14 @@ def main(args=None):
     config = Configuration(os.path.join(config_dir, 'rbackup.conf'))
     record = Record(os.path.join(config_dir, 'rbackup.last_backup'))
     prev_name = opts.previous or record.last_backup
-    new_name = backup_name()
+    time_name = format_time()
+    target_name = opts.target or time_name
 
     # Set up output/logging
     output = SequenceOutputHandler()
     output.addHandler(AnnotatedStreamOutputHandler())
     if config.LOG_DIR:
-        name = os.path.join(config.LOG_DIR, '%s.log' % new_name)
+        name = os.path.join(config.LOG_DIR, '%s.log' % time_name)
         output.addHandler(AnnotatedFileOutputHandler(name))
 
     if opts.verify:
@@ -291,7 +298,7 @@ def main(args=None):
             link = os.path.join('..', prev_name)
         else:
             link = None
-        target = os.path.join(config.BACKUP_POOL, new_name)
+        target = os.path.join(config.BACKUP_POOL, target_name)
         command = RsyncBackup(config.SOURCE, target, link)
 
     command.setOutputHandler(output)
@@ -336,7 +343,7 @@ def main(args=None):
     output.close()
 
     if not opts.verify and not opts.dry_run and result == 0:
-        record.last_backup = new_name
+        record.last_backup = target_name
         record.write()
 
     return result
