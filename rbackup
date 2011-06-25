@@ -308,15 +308,21 @@ def main(args=None):
         command.addArgs(config.BACKUP_OPTS)
     command.addArgs(opts.rsync_opts.split())
 
-    result = command.run()
-    if result is None:
+    rsync_result = command.run()
+    if rsync_result is None:
         output.log("rsync didn't exit??")
         result = 1
-    elif result > 0:
-        output.log('rsync error: %d' % result)
-    elif result < 0:
-        output.log('rsync exited with signal %d' % -result)
+    elif rsync_result > 0:
+        output.log('rsync error: %d' % rsync_result)
+        # rsync returns an error for a lot of trivial things, so we don't
+        # consider that an error.
+        # XXX Maybe specific rsync error codes should be checked.
+        result = 0
+    elif rsync_result < 0:
+        output.log('rsync exited with signal %d' % -rsync_result)
         result = 1
+    else:
+        result = 0
 
     output.log('')
     output.log('LEGEND:')
@@ -329,7 +335,7 @@ def main(args=None):
 
     output.close()
 
-    if not opts.verify and not opts.dry_run:
+    if not opts.verify and not opts.dry_run and result == 0:
         record.last_backup = new_name
         record.write()
 
